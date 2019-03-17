@@ -123,7 +123,7 @@ int main(int, char**)
 #endif
     GLFWwindow* window = glfwCreateWindow(1280, 720, "ImGui OpenGL3 example", NULL, NULL);
     glfwMakeContextCurrent(window);
-    glfwSwapInterval(1); // Enable vsync
+    glfwSwapInterval(60); // Enable vsync
     gl3wInit();
 
     ImGui::CreateContext();

@@ -35,14 +35,13 @@ static ed::EditorContext* m_Editor = nullptr;
 
 enum class PinType
 {
-    Flow,
+    None,
     Bool,
     Int,
     Float,
-    String,
-    Object,
-    Function,
-    Delegate,
+    SampledCurve,       // returns x = f(t), where t is a normalized input (0..1)
+    PointCloud,         // { position, normal direction }
+    SpawnableGeometry,  // { PointCloud + delay (normalized) + }
 };
 
 enum class PinKind
@@ -59,6 +58,49 @@ enum class NodeType
     Comment
 };
 
+enum class AttributeType
+{
+    None,
+    Combo,
+    TextField,
+    Checkbox,
+};
+
+struct Attribute
+{
+    AttributeType Type;
+    std::string   Label;
+    // Storage
+    char          _textFieldBuffer[128];
+    bool          _checkboxValue;
+    int           _comboNumEntries;
+    char          _comboEntries[16][128];
+    int           _comboSelection;
+
+    Attribute() { }
+    Attribute(const char *label, AttributeType type)
+    {
+        Setup(label, type);
+    }
+
+    void Setup(const char *label, AttributeType type)
+    {
+        Label = std::string(label);
+        Type = type;
+        strcpy(_textFieldBuffer, "0");
+        _checkboxValue = 1;
+        _comboNumEntries = 0;
+        _comboSelection = 0;
+    }
+
+    void AppendComboEntry(const char *entry)
+    {
+        assert(strlen(entry) < 128);
+        strcpy(_comboEntries[_comboNumEntries], entry);
+        ++_comboNumEntries;
+    }
+};
+
 struct Node;
 
 struct Pin
@@ -68,10 +110,12 @@ struct Pin
     std::string Name;
     PinType     Type;
     PinKind     Kind;
+    Attribute   Editor;
 
-    Pin(int id, const char* name, PinType type):
-        ID(id), Node(nullptr), Name(name), Type(type), Kind(PinKind::Input)
+    Pin(int id, const char* name, PinType type, AttributeType editor = AttributeType::None, PinKind kind = PinKind::Input):
+        ID(id), Node(nullptr), Name(name), Type(type), Kind(kind)
     {
+        Editor.Setup(name, editor);
     }
 };
 
@@ -257,180 +301,141 @@ static void BuildNode(Node* node)
     }
 }
 
-static Node* SpawnInputActionNode()
+const char* CATEGORY_HEADER_STR(const char *str)
 {
-    s_Nodes.emplace_back(GetNextId(), "InputAction Fire", ImColor(255, 128, 128));
-    s_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Delegate);
-    s_Nodes.back().Outputs.emplace_back(GetNextId(), "Pressed", PinType::Flow);
-    s_Nodes.back().Outputs.emplace_back(GetNextId(), "Released", PinType::Flow);
+    const int kMaxLength = 23;
+    static char buffer[kMaxLength + 1];
+    memset(buffer, '-', kMaxLength);
+    buffer[kMaxLength] = 0;
+    int initialIndex = (23 - strlen(str)) / 2;
+    if (initialIndex < 0) {
+        initialIndex = 0;
+    }
+    for (int i = 0; str[i] && i < kMaxLength; ++i) {
+        buffer[initialIndex + i] = str[i];
+    }
+    if (initialIndex > 0) {
+        buffer[initialIndex - 1] = ' ';
+    }
+    if (initialIndex + strlen(str) < kMaxLength) {
+        buffer[initialIndex + strlen(str)] = ' ';
+    }
+    return buffer;
+}
+
+#define SEPARATOR(str) s_Nodes.back().Inputs.emplace_back(GetNextId(), CATEGORY_HEADER_STR(str), PinType::None, AttributeType::None);
+// ### nodes ###
+
+static Node* SpawnEmitterNode()
+{
+    s_Nodes.emplace_back(GetNextId(), "Particle Emitter", ImColor(255, 255, 255));
+    SEPARATOR("Emitter");
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Name", PinType::None, AttributeType::TextField);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Emitter Rotation (vec3)", PinType::None, AttributeType::None);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Emitter Rotation Speed", PinType::None, AttributeType::None);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Geometry Spawner", PinType::SpawnableGeometry, AttributeType::None);
 
     BuildNode(&s_Nodes.back());
 
     return &s_Nodes.back();
 }
 
-static Node* SpawnBranchNode()
+static Node* SpawnSpawnerNode()
 {
-    s_Nodes.emplace_back(GetNextId(), "Branch");
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Condition", PinType::Bool);
-    s_Nodes.back().Outputs.emplace_back(GetNextId(), "True", PinType::Flow);
-    s_Nodes.back().Outputs.emplace_back(GetNextId(), "False", PinType::Flow);
+    s_Nodes.emplace_back(GetNextId(), "Spawner", ImColor(128, 128, 128));
+    s_Nodes.back().Outputs.emplace_back(GetNextId(), "Output", PinType::SpawnableGeometry, AttributeType::None);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Active", PinType::Bool, AttributeType::Checkbox);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Spawn Rate", PinType::Int, AttributeType::TextField);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Delay", PinType::Float, AttributeType::TextField);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Duration", PinType::Float, AttributeType::TextField);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Loop", PinType::Bool, AttributeType::Checkbox);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Loop Delay", PinType::Float, AttributeType::TextField);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Particle Placement", PinType::PointCloud, AttributeType::None);
+    SEPARATOR("Geometry");
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Shape", PinType::None, AttributeType::Combo);
+    s_Nodes.back().Inputs.back().Editor.AppendComboEntry("Quad");
+    s_Nodes.back().Inputs.back().Editor.AppendComboEntry("Sphere");
+    s_Nodes.back().Inputs.back().Editor.AppendComboEntry("Cylinder");
+    s_Nodes.back().Inputs.back().Editor.AppendComboEntry("Custom");
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Anchor (vec3)", PinType::None, AttributeType::None);
+    SEPARATOR("UVs");
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "UV Offset (vec2)", PinType::None, AttributeType::None);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "UV Speed (vec2)", PinType::None, AttributeType::None);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "UV Tile (vec2)", PinType::None, AttributeType::None);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "UV Clamp U", PinType::Bool, AttributeType::Checkbox);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "UV Clamp V", PinType::Bool, AttributeType::Checkbox);
+
 
     BuildNode(&s_Nodes.back());
 
     return &s_Nodes.back();
 }
 
-static Node* SpawnDoNNode()
+static Node* SpawnBoxPlacementNode()
 {
-    s_Nodes.emplace_back(GetNextId(), "Do N");
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Enter", PinType::Flow);
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "N", PinType::Int);
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Reset", PinType::Flow);
-    s_Nodes.back().Outputs.emplace_back(GetNextId(), "Exit", PinType::Flow);
-    s_Nodes.back().Outputs.emplace_back(GetNextId(), "Counter", PinType::Int);
+    s_Nodes.emplace_back(GetNextId(), "Box Placement", ImColor(128, 128, 128));
+    s_Nodes.back().Outputs.emplace_back(GetNextId(), "Output", PinType::PointCloud, AttributeType::None);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Origin (vec3)", PinType::None, AttributeType::None);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Origin Delta (vec3)", PinType::None, AttributeType::None);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Random Seed", PinType::Int, AttributeType::TextField);
 
     BuildNode(&s_Nodes.back());
 
     return &s_Nodes.back();
 }
 
-static Node* SpawnOutputActionNode()
+static Node* SpawnEllipsoidPlacementNode()
 {
-    s_Nodes.emplace_back(GetNextId(), "OutputAction");
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Sample", PinType::Float);
-    s_Nodes.back().Outputs.emplace_back(GetNextId(), "Condition", PinType::Bool);
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Event", PinType::Delegate);
+    s_Nodes.emplace_back(GetNextId(), "Ellipsoid Placement", ImColor(128, 128, 128));
+    s_Nodes.back().Outputs.emplace_back(GetNextId(), "Output", PinType::PointCloud, AttributeType::None);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Radius (vec3)", PinType::None, AttributeType::None);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Radius Delta (vec3)", PinType::None, AttributeType::None);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "XZ Spread", PinType::Float, AttributeType::TextField);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "XY Spread", PinType::Float, AttributeType::TextField);
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Random Seed", PinType::Int, AttributeType::TextField);
 
     BuildNode(&s_Nodes.back());
 
     return &s_Nodes.back();
 }
 
-static Node* SpawnPrintStringNode()
+static Node* SpawnERDTransformNode()
 {
-    s_Nodes.emplace_back(GetNextId(), "Print String");
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "In String", PinType::String);
-    s_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Flow);
+    s_Nodes.emplace_back(GetNextId(), "ERD Transform", ImColor(128, 128, 255));
+    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Geometry", PinType::SpawnableGeometry);
+    s_Nodes.back().Outputs.emplace_back(GetNextId(), "Geometry", PinType::SpawnableGeometry);
 
     BuildNode(&s_Nodes.back());
 
     return &s_Nodes.back();
 }
 
-static Node* SpawnMessageNode()
+static Node* SpawnFloatConstantNode()
 {
-    s_Nodes.emplace_back(GetNextId(), "", ImColor(128, 195, 248));
-    s_Nodes.back().Type = NodeType::Simple;
-    s_Nodes.back().Outputs.emplace_back(GetNextId(), "Message", PinType::String);
+    s_Nodes.emplace_back(GetNextId(), "Float Constant", ImColor(255, 128, 128));
+    s_Nodes.back().Outputs.emplace_back(GetNextId(), "Value", PinType::Float);
 
     BuildNode(&s_Nodes.back());
 
     return &s_Nodes.back();
 }
 
-static Node* SpawnSetTimerNode()
+static Node* SpawnIntConstantNode()
 {
-    s_Nodes.emplace_back(GetNextId(), "Set Timer", ImColor(128, 195, 248));
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Object", PinType::Object);
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Function Name", PinType::Function);
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Time", PinType::Float);
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Looping", PinType::Bool);
-    s_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Flow);
+    s_Nodes.emplace_back(GetNextId(), "Int Constant", ImColor(255, 128, 128));
+    s_Nodes.back().Outputs.emplace_back(GetNextId(), "Value", PinType::Int);
 
     BuildNode(&s_Nodes.back());
 
     return &s_Nodes.back();
 }
 
-static Node* SpawnLessNode()
+static Node* SpawnCurveNode()
 {
-    s_Nodes.emplace_back(GetNextId(), "<", ImColor(128, 195, 248));
-    s_Nodes.back().Type = NodeType::Simple;
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Float);
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Float);
-    s_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Float);
+    s_Nodes.emplace_back(GetNextId(), "Curve", ImColor(255, 128, 128));
+    s_Nodes.back().Outputs.emplace_back(GetNextId(), "Sampled values", PinType::SampledCurve);
 
     BuildNode(&s_Nodes.back());
-
-    return &s_Nodes.back();
-}
-
-static Node* SpawnWeirdNode()
-{
-    s_Nodes.emplace_back(GetNextId(), "o.O", ImColor(128, 195, 248));
-    s_Nodes.back().Type = NodeType::Simple;
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Float);
-    s_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Float);
-    s_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Float);
-
-    BuildNode(&s_Nodes.back());
-
-    return &s_Nodes.back();
-}
-
-static Node* SpawnTraceByChannelNode()
-{
-    s_Nodes.emplace_back(GetNextId(), "Single Line Trace by Channel", ImColor(255, 128, 64));
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Start", PinType::Flow);
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "End", PinType::Int);
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Trace Channel", PinType::Float);
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Trace Complex", PinType::Bool);
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Actors to Ignore", PinType::Int);
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Draw Debug Type", PinType::Bool);
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "Ignore Self", PinType::Bool);
-    s_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Flow);
-    s_Nodes.back().Outputs.emplace_back(GetNextId(), "Out Hit", PinType::Float);
-    s_Nodes.back().Outputs.emplace_back(GetNextId(), "Return Value", PinType::Bool);
-
-    BuildNode(&s_Nodes.back());
-
-    return &s_Nodes.back();
-}
-
-static Node* SpawnTreeSequenceNode()
-{
-    s_Nodes.emplace_back(GetNextId(), "Sequence");
-    s_Nodes.back().Type = NodeType::Tree;
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
-    s_Nodes.back().Outputs.emplace_back(GetNextId(), "", PinType::Flow);
-
-    BuildNode(&s_Nodes.back());
-
-    return &s_Nodes.back();
-}
-
-static Node* SpawnTreeTaskNode()
-{
-    s_Nodes.emplace_back(GetNextId(), "Move To");
-    s_Nodes.back().Type = NodeType::Tree;
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
-
-    BuildNode(&s_Nodes.back());
-
-    return &s_Nodes.back();
-}
-
-static Node* SpawnTreeTask2Node()
-{
-    s_Nodes.emplace_back(GetNextId(), "Random Wait");
-    s_Nodes.back().Type = NodeType::Tree;
-    s_Nodes.back().Inputs.emplace_back(GetNextId(), "", PinType::Flow);
-
-    BuildNode(&s_Nodes.back());
-
-    return &s_Nodes.back();
-}
-
-static Node* SpawnComment()
-{
-    s_Nodes.emplace_back(GetNextId(), "Test Comment");
-    s_Nodes.back().Type = NodeType::Comment;
-    s_Nodes.back().Size = ImVec2(300, 200);
 
     return &s_Nodes.back();
 }
@@ -475,30 +480,11 @@ void Application_Initialize()
     ed::SetCurrentEditor(m_Editor);
 
     Node* node;
-    node = SpawnInputActionNode();      ed::SetNodePosition(node->ID, ImVec2(-252, 220));
-    node = SpawnBranchNode();           ed::SetNodePosition(node->ID, ImVec2(-300, 351));
-    node = SpawnDoNNode();              ed::SetNodePosition(node->ID, ImVec2(-238, 504));
-    node = SpawnOutputActionNode();     ed::SetNodePosition(node->ID, ImVec2(71, 80));
-    node = SpawnSetTimerNode();         ed::SetNodePosition(node->ID, ImVec2(168, 316));
-
-    node = SpawnTreeSequenceNode();     ed::SetNodePosition(node->ID, ImVec2(1028, 329));
-    node = SpawnTreeTaskNode();         ed::SetNodePosition(node->ID, ImVec2(1204, 458));
-    node = SpawnTreeTask2Node();        ed::SetNodePosition(node->ID, ImVec2(868, 538));
-
-    node = SpawnComment();              ed::SetNodePosition(node->ID, ImVec2(112, 576));
-    node = SpawnComment();              ed::SetNodePosition(node->ID, ImVec2(800, 224));
-
-    node = SpawnLessNode();             ed::SetNodePosition(node->ID, ImVec2(366, 652));
-    node = SpawnWeirdNode();            ed::SetNodePosition(node->ID, ImVec2(144, 652));
-    node = SpawnMessageNode();          ed::SetNodePosition(node->ID, ImVec2(-348, 698));
-    node = SpawnPrintStringNode();      ed::SetNodePosition(node->ID, ImVec2(-69, 652));
+    node = SpawnEmitterNode();    ed::SetNodePosition(node->ID, ImVec2(-252, 220));
 
     ed::NavigateToContent();
 
     BuildNodes();
-
-    s_Links.push_back(Link(GetNextLinkId(), s_Nodes[5].Outputs[0].ID, s_Nodes[6].Inputs[0].ID));
-    s_Links.push_back(Link(GetNextLinkId(), s_Nodes[5].Outputs[0].ID, s_Nodes[7].Inputs[0].ID));
 
     s_HeaderBackground = Application_LoadTexture("Data/BlueprintBackground.png");
     s_SaveIcon         = Application_LoadTexture("Data/ic_save_white_24dp.png");
@@ -568,16 +554,54 @@ ImColor GetIconColor(PinType type)
     switch (type)
     {
         default:
-        case PinType::Flow:     return ImColor(255, 255, 255);
-        case PinType::Bool:     return ImColor(220,  48,  48);
-        case PinType::Int:      return ImColor( 68, 201, 156);
-        case PinType::Float:    return ImColor(147, 226,  74);
-        case PinType::String:   return ImColor(124,  21, 153);
-        case PinType::Object:   return ImColor( 51, 150, 215);
-        case PinType::Function: return ImColor(218,   0, 183);
-        case PinType::Delegate: return ImColor(255,  48,  48);
+        case PinType::Bool:                 return ImColor(201, 120, 156);
+        case PinType::Int:                  return ImColor( 68, 201, 156);
+        case PinType::Float:                return ImColor(147, 226,  74);
+        case PinType::SampledCurve:         return ImColor(124,  21, 153);
+        case PinType::PointCloud:           return ImColor(20,  49,  230);
+        case PinType::SpawnableGeometry:    return ImColor(230, 230,  30);
     }
 };
+
+void DrawAttribute(Attribute &attribute, bool isLinked)
+{
+    if (isLinked)
+    {
+        ImGui::PushItemFlag(ImGuiItemFlags_Disabled, true);
+        ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.5f);
+    }
+
+    if (attribute.Type == AttributeType::TextField)
+    {
+        ImGui::TextUnformatted(attribute.Label.c_str());
+        ImGui::Spring(0);
+        ImGui::PushItemWidth(40.0f);
+        ImGui::InputText("##value", attribute._textFieldBuffer, sizeof(attribute._textFieldBuffer));
+        ImGui::PopItemWidth();
+    } else if (attribute.Type == AttributeType::Combo)
+    {
+        // label
+        ImGui::TextUnformatted(attribute.Label.c_str());
+        ImGui::Spring(0);
+        // combo box
+        char *entries[1024];
+        for (int i = 0; i < attribute._comboNumEntries; ++i) {
+            entries[i] = attribute._comboEntries[i];
+        }
+        ImGui::PushItemWidth(120);
+        ImGui::Combo("", &attribute._comboSelection, entries, attribute._comboNumEntries);
+        ImGui::PopItemWidth();
+    } else if (attribute.Type == AttributeType::Checkbox)
+    {
+        ImGui::Checkbox(attribute.Label.c_str(), &attribute._checkboxValue);
+    }
+
+    if (isLinked)
+    {
+        ImGui::PopItemFlag();
+        ImGui::PopStyleVar();
+    }
+}
 
 void DrawPinIcon(const Pin& pin, bool connected, int alpha)
 {
@@ -586,14 +610,12 @@ void DrawPinIcon(const Pin& pin, bool connected, int alpha)
     color.Value.w = alpha / 255.0f;
     switch (pin.Type)
     {
-        case PinType::Flow:     iconType = IconType::Flow;   break;
-        case PinType::Bool:     iconType = IconType::Circle; break;
-        case PinType::Int:      iconType = IconType::Circle; break;
-        case PinType::Float:    iconType = IconType::Circle; break;
-        case PinType::String:   iconType = IconType::Circle; break;
-        case PinType::Object:   iconType = IconType::Circle; break;
-        case PinType::Function: iconType = IconType::Circle; break;
-        case PinType::Delegate: iconType = IconType::Square; break;
+        case PinType::Bool:                 iconType = IconType::Circle; break;
+        case PinType::Int:                  iconType = IconType::Circle; break;
+        case PinType::Float:                iconType = IconType::Circle; break;
+        case PinType::SampledCurve:         iconType = IconType::Square; break;
+        case PinType::PointCloud:           iconType = IconType::Flow; break;
+        case PinType::SpawnableGeometry:    iconType = IconType::Flow; break;
         default:
             return;
     }
@@ -887,9 +909,6 @@ void Application_Frame()
             const auto isSimple = node.Type == NodeType::Simple;
 
             bool hasOutputDelegates = false;
-            for (auto& output : node.Outputs)
-                if (output.Type == PinType::Delegate)
-                    hasOutputDelegates = true;
 
             builder.Begin(node.ID);
                 if (!isSimple)
@@ -905,9 +924,6 @@ void Application_Frame()
                             ImGui::Spring(1, 0);
                             for (auto& output : node.Outputs)
                             {
-                                if (output.Type != PinType::Delegate)
-                                    continue;
-
                                 auto alpha = ImGui::GetStyle().Alpha;
                                 if (newLinkPin && !CanCreateLink(newLinkPin, &output) && &output != newLinkPin)
                                     alpha = alpha * (48.0f / 255.0f);
@@ -949,15 +965,13 @@ void Application_Frame()
                     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha);
                     DrawPinIcon(input, IsPinLinked(input.ID), (int)(alpha * 255));
                     ImGui::Spring(0);
-                    if (!input.Name.empty())
+                    if (input.Editor.Type == AttributeType::None)
                     {
                         ImGui::TextUnformatted(input.Name.c_str());
                         ImGui::Spring(0);
-                    }
-                    if (input.Type == PinType::Bool)
+                    } else 
                     {
-                         ImGui::Button("Hello");
-                         ImGui::Spring(0);
+                        DrawAttribute(input.Editor, IsPinLinked(input.ID));
                     }
                     ImGui::PopStyleVar();
                     builder.EndInput();
@@ -974,35 +988,12 @@ void Application_Frame()
 
                 for (auto& output : node.Outputs)
                 {
-                    if (!isSimple && output.Type == PinType::Delegate)
-                        continue;
-
                     auto alpha = ImGui::GetStyle().Alpha;
                     if (newLinkPin && !CanCreateLink(newLinkPin, &output) && &output != newLinkPin)
                         alpha = alpha * (48.0f / 255.0f);
 
                     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha);
                     builder.Output(output.ID);
-                    if (output.Type == PinType::String)
-                    {
-                        static char buffer[128] = "Edit Me\nMultiline!";
-                        static bool wasActive = false;
-
-                        ImGui::PushItemWidth(100.0f);
-                        ImGui::InputText("##edit", buffer, 127);
-                        ImGui::PopItemWidth();
-                        if (ImGui::IsItemActive() && !wasActive)
-                        {
-                            ed::EnableShortcuts(false);
-                            wasActive = true;
-                        }
-                        else if (!ImGui::IsItemActive() && wasActive)
-                        {
-                            ed::EnableShortcuts(true);
-                            wasActive = false;
-                        }
-                        ImGui::Spring(0);
-                    }
                     if (!output.Name.empty())
                     {
                         ImGui::Spring(0);
@@ -1423,37 +1414,26 @@ void Application_Frame()
         //drawList->AddCircleFilled(ImGui::GetMousePosOnOpeningCurrentPopup(), 10.0f, 0xFFFF00FF);
 
         Node* node = nullptr;
-        if (ImGui::MenuItem("Input Action"))
-            node = SpawnInputActionNode();
-        if (ImGui::MenuItem("Output Action"))
-            node = SpawnOutputActionNode();
-        if (ImGui::MenuItem("Branch"))
-            node = SpawnBranchNode();
-        if (ImGui::MenuItem("Do N"))
-            node = SpawnDoNNode();
-        if (ImGui::MenuItem("Set Timer"))
-            node = SpawnSetTimerNode();
-        if (ImGui::MenuItem("Less"))
-            node = SpawnLessNode();
-        if (ImGui::MenuItem("Weird"))
-            node = SpawnWeirdNode();
-        if (ImGui::MenuItem("Trace by Channel"))
-            node = SpawnTraceByChannelNode();
-        if (ImGui::MenuItem("Print String"))
-            node = SpawnPrintStringNode();
+        if (ImGui::MenuItem("Float Constant"))
+            node = SpawnFloatConstantNode();
+        if (ImGui::MenuItem("Int Constant"))
+            node = SpawnIntConstantNode();
         ImGui::Separator();
-        if (ImGui::MenuItem("Comment"))
-            node = SpawnComment();
+        if (ImGui::MenuItem("Curve"))
+            node = SpawnCurveNode();
         ImGui::Separator();
-        if (ImGui::MenuItem("Sequence"))
-            node = SpawnTreeSequenceNode();
-        if (ImGui::MenuItem("Move To"))
-            node = SpawnTreeTaskNode();
-        if (ImGui::MenuItem("Random Wait"))
-            node = SpawnTreeTask2Node();
+        if (ImGui::MenuItem("Spawner"))
+            node = SpawnSpawnerNode();
+        if (ImGui::MenuItem("Box Placement"))
+            node = SpawnBoxPlacementNode();
+        if (ImGui::MenuItem("Ellipsoid Placement"))
+            node = SpawnEllipsoidPlacementNode();
+        if (ImGui::MenuItem("ERD Transform"))
+            node = SpawnERDTransformNode();
         ImGui::Separator();
-        if (ImGui::MenuItem("Message"))
-            node = SpawnMessageNode();
+        if (ImGui::MenuItem("Particle Emitter"))
+            node = SpawnEmitterNode();
+
 
         if (node)
         {

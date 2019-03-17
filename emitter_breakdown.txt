@@ -1,0 +1,138 @@
+
+- <Particle Emitter>
+    - <Node properties>
+        - emitterName
+        - emitterRotation (vec3)
+        - emitterRotationSpeed (vec3)
+
+    - [NODE] Emission:
+        - active (bool)
+        - delay (float)
+        - duration (float)
+            - [if > 0] looping (bool)
+                - loopDelay (float) 
+        - emission mode (choice)
+            - New
+                - spawn rate (curve)
+            - Legacy
+                - maxParticles (int)
+                - randomEmission (bool)
+        - [NODE] Placement:
+            - randomSeed (int)
+            - [Legacy Box]
+                - cartesianPosition (vec3)
+                - cartesianPositionDelta (vec3)
+            - [Legacy Ellipsoid]
+                - polarPosition (vec3)
+                - polarPositionDelta (vec3)
+                - polarXZSpread (float)
+                - polarXYSpread (float)
+
+    - <Particles>
+        - particleLifespan + random (float, float)
+        - targetingDuration + random (float, float)
+        - <Geometry>
+            - Shape (choice)
+                - Quad
+                - Sphere
+                    - segments (int)
+                    - arc (float)
+                    - cut (float)
+                - Cylinder
+                    - segments (int)
+                    - arc (float)
+                    - length (float)
+                    - radius #2 (float)
+                - Custom
+                    - mesh file (uri)
+            - anchor (vec3)
+            - <UVs> --- NOTE: NOT ALL PROPERTIES WORK WHEN COMBINED. SPEND TIME TO SEPARATE THEM
+                - uvOffset (vec2)
+                - uvScrollSpeed + random (vec2, vec2)
+                - uvTile (vec2)
+                - uvFlip (vec2)
+                - uvClampU (bool)
+                - uvClampV (bool)
+            - depthWriting (bool)
+            - depthOffset (float)
+        - <Shading>
+            - texturePath (uri)
+                - [do not expose] multiplyOpacity = (texturePath != empty)
+                - filtering (choice)
+                    - None
+                    - Bilinear
+                - tiles (vec2)
+                    - speed (float)
+                    - frameRange (vec2)
+                    - randomFrame (bool)
+                        - [if false] initialFrame (int)
+                - textureRotation (float)
+            - blendFunction (choice)
+                - Normal
+                - Additive
+                - Screen
+                - Difference
+                - Programmable
+                    - progBlendMix (float)
+                    - progBlendMul (float)
+                    - progBlendAdd (float)
+            - drawBackFaces (bool)
+            - shader (choice)
+                - Default
+                - <list all custom shaders>
+                    - <list all custom uniforms for each shader>
+            - <tinting>
+                - mode (choice) [replaces useColor] --- DEPRECATE COLOR RANDOMNESS
+                    - RGBA
+                    - Alpha
+                - [custom color gradient editor with support for 1-3 key frames]
+                - overmultiplyAlpha (float)
+                - opacityKeys --- CALL IT emitterOpacity OR SOMETHING MORE OBVIOUS
+                - useAlphaTest (bool) [hardcoded to 0.1]
+                - useClamping (bool) --- DEPRECATE IT?
+                    - curve with 1-3 key frames
+        - <Transform/Movement>
+            - worldSpace (bool)
+            - size + random (float, float) --- DEPRECATE IT IN FAVOR OR SCALE KEY FRAMES?
+            - Orientation Override (choice)
+                - Always face camera
+                - Billboard around X
+                - Billboard around Y
+                - Billboard around Direction
+                - Follow direction (no billboarding)
+                - Fixed --- NON BACKWARDS COMPATIBLE, SOME OF THE SUB-OPTIONS ARE USED IN COMBINATION WITH THE OTHER OPTIONS
+                    - nbRotation (vec3)
+                    - nbRotationInitialSpeed (vec3)
+                    - nbRotationFinalSpeed (vec3)
+            - <Scale> [custom editor with support for XYZ & uniform scale, randomness, 1-4 key frames]
+            - Stretch with speed (choice)
+                - None
+                - Y only
+                    - Factor (float)
+                - XYZ
+                    - Factor (float)
+            - spriteRotation + random (float, float) -- NOTE: SAME AS nbRotation, BUT WORKS WITH ALL ORIENTATION TYPES
+                - spriteRotationSpeed + random (float, float)
+            - [NODE] Physics
+                - [Cartesian]
+                    - cartesianSpeed (vec3)
+                    - cartesianSpeedDelta (vec3)
+                    - cartesianAcceleration (vec3)
+                - [Polar]
+                    - polarSpeed (vec3)
+                    - polarAcceleration (vec3)
+                    - polarXZSpeed (float)
+                    - polarXZAcceleration (float)
+
+
+
+
+
+TODO:
+# Geometry post-processing Node: takes placement data and returns new data
+    - ERD logic implemented as one of these!
+        - erdEnabled (bool)
+        - erdFaceAxis (bool)
+        - erdAngles (vec2)
+        - erdSpinRate (float)
+# break down random seed per node?
